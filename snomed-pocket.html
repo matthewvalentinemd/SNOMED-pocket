@@ -425,7 +425,8 @@ function editionOf(uri){var m=/sct\/(\d+)/.exec(uri||"");return m?m[1]:""}
 function editionLabel(mod){return (EDITIONS[mod]||("Module "+mod))+" Edition"}
 function setEditionOptions(mods){
   var sel=$("sEditionSel"),cur=editionOf(cfg.edition);
-  if(cur&&mods.indexOf(cur)<0)mods.push(cur);
+  mods=mods.filter(function(m){return EDITIONS[m]});
+  if(cur&&EDITIONS[cur]&&mods.indexOf(cur)<0)mods.push(cur);
   mods.sort(function(a,b){if(a==="900000000000207008")return -1;if(b==="900000000000207008")return 1;return editionLabel(a).localeCompare(editionLabel(b))});
   sel.innerHTML='<option value="">Server default</option>'+mods.map(function(m){return '<option value="'+SCT+'/'+m+'">'+esc(editionLabel(m))+'</option>'}).join("")+'<option value="__custom">Other (enter URI)…</option>';
   var exact=cfg.edition&&cfg.edition===SCT+"/"+cur;
