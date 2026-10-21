@@ -433,15 +433,15 @@ function setEditionOptions(mods){
   sel.value=!cfg.edition?"":(exact?cfg.edition:"__custom");
   $("sEditionWrap").hidden=sel.value!=="__custom";
 }
-var editionsLoaded=false;
+var editionsLoaded=false,editionMods=[];
 function loadEditions(){
-  setEditionOptions([]);
+  setEditionOptions(editionMods.slice());
   if(editionsLoaded)return;
   $("sEditionSel").options[0].textContent="Server default (loading editions…)";
   fhir("/CodeSystem",[["url",SCT],["_elements","url,version,title"],["_count","500"]]).then(function(b){
     var mods=[];
     (b.entry||[]).forEach(function(e){var m=editionOf(e.resource&&e.resource.version);if(m&&mods.indexOf(m)<0)mods.push(m)});
-    editionsLoaded=true;setEditionOptions(mods);
+    editionsLoaded=true;editionMods=mods;setEditionOptions(mods.slice());
   }).catch(function(){
     setEditionOptions(["900000000000207008","32506021000036107","21000210109"]);
     $("sEditionSel").options[0].textContent="Server default (couldn't list editions)";
