@@ -90,6 +90,10 @@ section>h2{margin:0;padding:12px 14px;font-size:.78rem;letter-spacing:.08em;text
 .more{border:0;background:var(--accent-soft);color:var(--accent);padding:11px;width:100%;cursor:pointer;font-weight:700}
 details summary{cursor:pointer;padding:12px 14px;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .desc{padding:8px 14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}
+.desc .dia{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex:none;max-width:50%}
+.dtag{font-size:.7rem;letter-spacing:.04em;border-radius:999px;padding:1px 7px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.legend{padding:0 14px 10px;margin:0;font-size:.8rem;color:var(--muted)}
+#settings select{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:9px 10px;font-size:15px;min-width:0;width:100%}
 .desc .lang{font-family:var(--font-mono);font-size:.75rem;color:var(--muted);flex:none}
 .empty{padding:14px;color:var(--muted)}
 .err{border-radius:12px;padding:14px;background:var(--warn-bg);color:var(--warn)}
@@ -122,7 +126,9 @@ footer a{color:inherit}
     <form id="settings">
       <label for="sBase">FHIR endpoint
         <input id="sBase" type="url" inputmode="url" autocomplete="off"></label>
-      <label for="sEdition">Edition URI (blank for the server default)
+      <label for="sEditionSel">Edition
+        <select id="sEditionSel"><option value="">Server default</option></select></label>
+      <label for="sEdition" id="sEditionWrap" hidden>Edition URI
         <input id="sEdition" type="text" autocomplete="off" placeholder="http://snomed.info/sct/21000210109"></label>
       <label for="sToken">Bearer token (only for servers that need sign-in, such as NZHTS)
         <input id="sToken" type="password" autocomplete="off"></label>
@@ -147,6 +153,9 @@ var FSN="900000000000003001";
 var ROOT="138875005";
 var GROUP="609096000";
 var ISA="116680003";
+var DIALECTS={"900000000000509007":"US","900000000000508004":"GB","32570271000036106":"AU","271000210107":"NZ"};
+var EDITIONS={"900000000000207008":"International","32506021000036107":"Australian","21000210109":"New Zealand","731000124108":"United States","83821000000107":"United Kingdom","999000041000000102":"United Kingdom","20611000087101":"Canadian","11000220105":"Irish","11000146104":"Netherlands","11000172109":"Belgian","554471000005108":"Danish","45991000052106":"Swedish","2011000195101":"Swiss","449081005":"Spanish","5631000179106":"Uruguayan","51000202101":"Norwegian","11000181102":"Estonian","11000229106":"Finnish","1121000189102":"Indian","827022005":"IPS Terminology"};
+var refsetNames={};
 
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);if(v===null)localStorage.removeItem(k);else localStorage.setItem(k,v)}catch(e){return null}}
 var cfg={base:ls("sp.base")||DEFAULT_BASE,edition:ls("sp.edition")||"",token:ls("sp.token")||""};
@@ -284,15 +293,28 @@ function open(code,push){
     remember(code,d.display);
     var ungrouped=d.attrs,groups=d.groups;
     if(!ungrouped.length&&!groups.length&&d.normalFormTerse){var nf=parseNormalForm(d.normalFormTerse);ungrouped=nf.ungrouped;groups=nf.groups}
-    var syn=d.designations.filter(function(x){return x.use!==FSN&&x.value});
-    var seen={};syn=syn.filter(function(x){var k=x.value+"|"+x.lang;if(seen[k])return false;seen[k]=1;return true});
+    var syn=[],byVal={},refsets={};
+    d.designations.forEach(function(x){
+      if(!x.value||x.use===FSN)return;
+      var e=byVal[x.value];if(!e){e=byVal[x.value]={value:x.value,prefs:[],langs:[]};syn.push(e)}
+      var m=/^[a-z]{2,3}-x-sctlang-([\d-]+)$/i.exec(x.lang||"");
+      if(m){var id=m[1].replace(/-/g,"");if(e.prefs.indexOf(id)<0)e.prefs.push(id);refsets[id]=1}
+      else if(x.lang&&x.lang.toLowerCase().indexOf("en")!==0&&e.langs.indexOf(x.lang)<0)e.langs.push(x.lang);
+    });
+    syn.sort(function(a,b){return b.prefs.length-a.prefs.length});
+    var nRefsets=Object.keys(refsets).length;
+    var varies=syn.filter(function(x){return x.prefs.length}).length>1;
     var h='<div id="parentsSlot"></div><div class="focus'+(defined?" defined":"")+'">'+
       '<h1>'+esc(d.display)+'</h1>'+(d.fsn&&d.fsn!==d.display?'<p class="fsn">'+esc(d.fsn)+'</p>':"")+
       '<div class="idrow"><span class="code">'+code+'</span><button class="copy" id="copyBtn" type="button">Copy</button>'+
       '<span class="chip '+(defined?"def":"prim")+'" title="'+(defined?"Sufficiently defined (≡)":"Primitive (⊑)")+'">'+(defined?"≡ Defined":"⊑ Primitive")+'</span>'+
       (inactive?'<span class="chip inact">Inactive</span>':"")+'</div>'+
       (d.version?'<p class="small" style="margin:8px 0 0;word-break:break-all">'+esc(d.version)+'</p>':"")+'</div>';
-    if(syn.length)h+='<section><details><summary>Synonyms ('+syn.length+')</summary>'+syn.map(function(s){return '<div class="desc"><span>'+esc(s.value)+'</span><span class="lang">'+esc(s.lang||"")+'</span></div>'}).join("")+'</details></section>';
+    if(syn.length)h+='<section><details'+(varies?' open':'')+'><summary>Synonyms ('+syn.length+')'+(varies?' · preferred term differs by variant':'')+'</summary>'+
+      (nRefsets?'<p class="legend">Tags show the English variants where each term is the preferred term.</p>':'')+
+      syn.map(function(x){return '<div class="desc"><span>'+esc(x.value)+'</span><span class="dia">'+
+        x.prefs.map(function(id){return '<span class="dtag" data-refset="'+id+'" title="Preferred in refset '+id+'">'+esc(dialectName(id))+'</span>'}).join("")+
+        x.langs.map(function(l){return '<span class="lang">'+esc(l)+'</span>'}).join("")+'</span></div>'}).join("")+'</details></section>';
     if(ungrouped.length||groups.length){
       var body='<div class="groups">';
       if(ungrouped.length)body+='<div class="grp"><span class="grp-label">Ungrouped</span>'+ungrouped.map(relHTML).join("")+'</div>';
@@ -303,6 +325,7 @@ function open(code,push){
     h+='<div id="childrenSlot"></div>';
     view.innerHTML=h;
     $("copyBtn").onclick=function(){copy(code+" |"+d.display+"|",this)};
+    labelRefsets(Object.keys(refsets),seq);
     labelAttrs(ungrouped.concat([].concat.apply([],groups)),seq);
     P.then(function(r){if(seq!==loadSeq)return;fill("parentsSlot","Parents",r,">!",code)},function(e){fillErr("parentsSlot","Parents",e)});
     C.then(function(r){if(seq!==loadSeq)return;fill("childrenSlot","Children",r,"<!",code)},function(e){fillErr("childrenSlot","Children",e)});
@@ -327,6 +350,16 @@ function labelAttrs(rels,seq){
       });
     }).catch(function(){});
   });
+}
+function dialectName(id){return DIALECTS[id]||refsetNames[id]||id}
+function labelRefsets(ids,seq){
+  var need=ids.filter(function(id){return !DIALECTS[id]&&!refsetNames[id]});
+  if(!need.length)return;
+  expand("("+need.join(" OR ")+")",{count:need.length,active:false}).then(function(r){
+    r.items.forEach(function(it){refsetNames[it.code]=it.display.replace(/ language reference set$/i,"").replace(/ language refset$/i,"")});
+    if(seq!==loadSeq)return;
+    view.querySelectorAll("[data-refset]").forEach(function(el){el.textContent=dialectName(el.dataset.refset)});
+  }).catch(function(){});
 }
 function fill(slot,title,r,op,code){
   var el=$(slot);if(!el)return;
@@ -388,14 +421,41 @@ document.addEventListener("click",function(e){
 $("back").onclick=function(){if(stack.length)open(stack.pop(),false);$("back").disabled=!stack.length};
 
 /* ---------- settings ---------- */
-function fillSettings(){$("sBase").value=cfg.base;$("sEdition").value=cfg.edition;$("sToken").value=cfg.token}
+function editionOf(uri){var m=/sct\/(\d+)/.exec(uri||"");return m?m[1]:""}
+function editionLabel(mod){return (EDITIONS[mod]||("Module "+mod))+" Edition"}
+function setEditionOptions(mods){
+  var sel=$("sEditionSel"),cur=editionOf(cfg.edition);
+  if(cur&&mods.indexOf(cur)<0)mods.push(cur);
+  mods.sort(function(a,b){if(a==="900000000000207008")return -1;if(b==="900000000000207008")return 1;return editionLabel(a).localeCompare(editionLabel(b))});
+  sel.innerHTML='<option value="">Server default</option>'+mods.map(function(m){return '<option value="'+SCT+'/'+m+'">'+esc(editionLabel(m))+'</option>'}).join("")+'<option value="__custom">Other (enter URI)…</option>';
+  var exact=cfg.edition&&cfg.edition===SCT+"/"+cur;
+  sel.value=!cfg.edition?"":(exact?cfg.edition:"__custom");
+  $("sEditionWrap").hidden=sel.value!=="__custom";
+}
+var editionsLoaded=false;
+function loadEditions(){
+  setEditionOptions([]);
+  if(editionsLoaded)return;
+  $("sEditionSel").options[0].textContent="Server default (loading editions…)";
+  fhir("/CodeSystem",[["url",SCT],["_elements","url,version,title"],["_count","500"]]).then(function(b){
+    var mods=[];
+    (b.entry||[]).forEach(function(e){var m=editionOf(e.resource&&e.resource.version);if(m&&mods.indexOf(m)<0)mods.push(m)});
+    editionsLoaded=true;setEditionOptions(mods);
+  }).catch(function(){
+    setEditionOptions(["900000000000207008","32506021000036107","21000210109"]);
+    $("sEditionSel").options[0].textContent="Server default (couldn't list editions)";
+  });
+}
+$("sEditionSel").addEventListener("change",function(){var v=this.value;$("sEditionWrap").hidden=v!=="__custom";if(v!=="__custom")$("sEdition").value=v});
+function fillSettings(){$("sBase").value=cfg.base;$("sEdition").value=cfg.edition;$("sToken").value=cfg.token;loadEditions()}
 $("cog").onclick=function(){var s=$("settingsBox");s.hidden=!s.hidden;if(!s.hidden)fillSettings()};
 $("settings").addEventListener("submit",function(e){e.preventDefault();
-  cfg.base=$("sBase").value.trim()||DEFAULT_BASE;cfg.edition=$("sEdition").value.trim();cfg.token=$("sToken").value.trim();
+  var nb=$("sBase").value.trim()||DEFAULT_BASE;if(nb!==cfg.base)editionsLoaded=false;cfg.base=nb;
+  var sv=$("sEditionSel").value;cfg.edition=sv==="__custom"?$("sEdition").value.trim():sv;cfg.token=$("sToken").value.trim();
   ls("sp.base",cfg.base);ls("sp.edition",cfg.edition||null);ls("sp.token",cfg.token||null);
   $("settingsBox").hidden=true;open(current||ROOT,false);
 });
-$("sReset").onclick=function(){cfg={base:DEFAULT_BASE,edition:"",token:""};ls("sp.base",null);ls("sp.edition",null);ls("sp.token",null);fillSettings()};
+$("sReset").onclick=function(){editionsLoaded=false;cfg={base:DEFAULT_BASE,edition:"",token:""};ls("sp.base",null);ls("sp.edition",null);ls("sp.token",null);fillSettings()};
 
 var start=(location.hash||"").replace("#","");
 renderTrail();
