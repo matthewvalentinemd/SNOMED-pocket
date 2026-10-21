@@ -78,7 +78,7 @@ section>h2{margin:0;padding:12px 14px;font-size:.78rem;letter-spacing:.08em;text
 .cl .t span{display:block}
 .cl svg{flex:none;width:16px;height:16px;stroke:var(--muted);fill:none;stroke-width:2}
 .box{flex:none;width:10px;height:10px;border-radius:2px;border:1.5px solid var(--prim-line);background:var(--prim)}
-.groups{display:flex;flex-direction:column;gap:10px;padding:12px}
+.groups{border-top:1px solid var(--line);display:flex;flex-direction:column;gap:10px;padding:12px}
 .grp{border:1px dashed var(--line);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:8px}
 .grp-label{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .rel{display:flex;flex-direction:column;gap:4px}
@@ -271,7 +271,7 @@ function open(code,push){
   try{history.replaceState(null,"","#"+code)}catch(e){}
   $("shrimpLink").href="https://ontoserver.csiro.au/shrimp/?concept="+code+"&valueset="+encodeURIComponent(vs(""))+"&fhir="+encodeURIComponent(cfg.base);
   var seq=++loadSeq;
-  view.innerHTML='<div class="focus"><div class="skel" style="width:70%;margin:0 0 10px"></div><div class="skel" style="width:45%;margin:0"></div></div>'+sectionHTML("Parents","",'<div class="skel"></div>')+sectionHTML("Children","",'<div class="skel"></div>');
+  view.innerHTML=sectionHTML("Parents","",'<div class="skel"></div>')+'<div class="focus"><div class="skel" style="width:70%;margin:0 0 10px"></div><div class="skel" style="width:45%;margin:0"></div></div>'+sectionHTML("Children","",'<div class="skel"></div>');
   window.scrollTo(0,0);
 
   var L=lookup(code);
@@ -286,22 +286,21 @@ function open(code,push){
     if(!ungrouped.length&&!groups.length&&d.normalFormTerse){var nf=parseNormalForm(d.normalFormTerse);ungrouped=nf.ungrouped;groups=nf.groups}
     var syn=d.designations.filter(function(x){return x.use!==FSN&&x.value});
     var seen={};syn=syn.filter(function(x){var k=x.value+"|"+x.lang;if(seen[k])return false;seen[k]=1;return true});
-    var h='<div class="focus'+(defined?" defined":"")+'">'+
+    var h='<div id="parentsSlot"></div><div class="focus'+(defined?" defined":"")+'">'+
       '<h1>'+esc(d.display)+'</h1>'+(d.fsn&&d.fsn!==d.display?'<p class="fsn">'+esc(d.fsn)+'</p>':"")+
       '<div class="idrow"><span class="code">'+code+'</span><button class="copy" id="copyBtn" type="button">Copy</button>'+
       '<span class="chip '+(defined?"def":"prim")+'" title="'+(defined?"Sufficiently defined (≡)":"Primitive (⊑)")+'">'+(defined?"≡ Defined":"⊑ Primitive")+'</span>'+
       (inactive?'<span class="chip inact">Inactive</span>':"")+'</div>'+
       (d.version?'<p class="small" style="margin:8px 0 0;word-break:break-all">'+esc(d.version)+'</p>':"")+'</div>';
-    h+='<div id="parentsSlot"></div>';
+    if(syn.length)h+='<section><details><summary>Synonyms ('+syn.length+')</summary>'+syn.map(function(s){return '<div class="desc"><span>'+esc(s.value)+'</span><span class="lang">'+esc(s.lang||"")+'</span></div>'}).join("")+'</details></section>';
     if(ungrouped.length||groups.length){
       var body='<div class="groups">';
       if(ungrouped.length)body+='<div class="grp"><span class="grp-label">Ungrouped</span>'+ungrouped.map(relHTML).join("")+'</div>';
       groups.forEach(function(g,i){body+='<div class="grp"><span class="grp-label">Role group '+(i+1)+'</span>'+g.map(relHTML).join("")+'</div>'});
       body+='</div>';
-      h+=sectionHTML("Attributes",ungrouped.length+groups.reduce(function(a,g){return a+g.length},0),body);
+      h+='<section><details><summary>Attributes ('+(ungrouped.length+groups.reduce(function(a,g){return a+g.length},0))+')</summary>'+body+'</details></section>';
     }
     h+='<div id="childrenSlot"></div>';
-    if(syn.length)h+='<section><details><summary>Synonyms ('+syn.length+')</summary>'+syn.map(function(s){return '<div class="desc"><span>'+esc(s.value)+'</span><span class="lang">'+esc(s.lang||"")+'</span></div>'}).join("")+'</details></section>';
     view.innerHTML=h;
     $("copyBtn").onclick=function(){copy(code+" |"+d.display+"|",this)};
     labelAttrs(ungrouped.concat([].concat.apply([],groups)),seq);
