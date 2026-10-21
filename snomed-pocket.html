@@ -91,7 +91,8 @@ section>h2{margin:0;padding:12px 14px;font-size:.78rem;letter-spacing:.08em;text
 details summary{cursor:pointer;padding:12px 14px;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .desc{padding:8px 14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}
 .desc .dia{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;flex:none;max-width:50%}
-.dtag{font-size:.7rem;letter-spacing:.04em;border-radius:999px;padding:1px 7px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+.dtag{font-size:.7rem;letter-spacing:.04em;border-radius:999px;padding:1px 7px;background:var(--accent-soft);color:var(--accent);max-width:100%;overflow-wrap:anywhere}
+.desc>span:first-child{min-width:0;flex:1}
 .legend{padding:0 14px 10px;margin:0;font-size:.8rem;color:var(--muted)}
 #settings select{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:9px 10px;font-size:15px;min-width:0;width:100%}
 .desc .lang{font-family:var(--font-mono);font-size:.75rem;color:var(--muted);flex:none}
@@ -351,12 +352,17 @@ function labelAttrs(rels,seq){
     }).catch(function(){});
   });
 }
+function shortRefset(n){
+  n=n.replace(/ language reference set$/i,"").replace(/ language refset$/i,"").replace(/ reference set$/i,"");
+  if(/^m[aā]ori\b/i.test(n))return "Maori";
+  return n.replace(/New Zealand/g,"NZ");
+}
 function dialectName(id){return DIALECTS[id]||refsetNames[id]||id}
 function labelRefsets(ids,seq){
   var need=ids.filter(function(id){return !DIALECTS[id]&&!refsetNames[id]});
   if(!need.length)return;
   expand("("+need.join(" OR ")+")",{count:need.length,active:false}).then(function(r){
-    r.items.forEach(function(it){refsetNames[it.code]=it.display.replace(/ language reference set$/i,"").replace(/ language refset$/i,"")});
+    r.items.forEach(function(it){refsetNames[it.code]=shortRefset(it.display)});
     if(seq!==loadSeq)return;
     view.querySelectorAll("[data-refset]").forEach(function(el){el.textContent=dialectName(el.dataset.refset)});
   }).catch(function(){});
