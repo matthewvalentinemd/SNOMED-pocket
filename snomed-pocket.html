@@ -98,6 +98,27 @@ details summary{cursor:pointer;padding:12px 14px;font-size:.78rem;letter-spacing
 #settings select{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:9px 10px;font-size:15px;min-width:0;width:100%}
 .desc .lang{font-family:var(--font-mono);font-size:.75rem;color:var(--muted);flex:none}
 .empty{padding:14px;color:var(--muted)}
+/* Landscape graph: grandparents | parents | concept | children, joined by curves like Shrimp */
+#graph{position:fixed;inset:0;z-index:20;background:var(--bg);display:flex;flex-direction:column;
+  padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+.gbar{flex:none;display:flex;align-items:center;gap:10px;padding:6px max(12px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line);background:var(--surface)}
+.gbar .iconbtn{width:34px;height:34px}
+.gbar .gtitle{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+.gkey{display:flex;gap:10px;align-items:center;font-size:.72rem;color:var(--muted);flex:none}
+.gkey i{display:inline-block;width:12px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.gscroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch}
+.gcontent{position:relative;display:flex;align-items:stretch;gap:34px;padding:14px 16px;min-height:100%;width:max-content;min-width:100%}
+.gcol{position:relative;z-index:1;display:flex;flex-direction:column;justify-content:center;gap:8px}
+.gn{display:flex;align-items:center;gap:6px;max-width:12.5rem;text-align:left;font-size:.78rem;line-height:1.2;padding:6px 10px;border-radius:9px;
+  background:var(--surface);border:1.5px solid var(--line);cursor:pointer}
+.gn.p{background:var(--prim);border-color:var(--prim-line)}
+.gn.d{background:var(--defined);border:3px double var(--defined-line);padding:5px 9px}
+.gn.focus-n{font-size:.9rem;max-width:13rem;font-weight:700;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent);cursor:default}
+.gn .kids{margin-left:auto}
+.gn.more{background:none;border-style:dashed;color:var(--muted);cursor:default}
+#gsvg{position:absolute;left:0;top:0;z-index:0;pointer-events:none;overflow:visible}
+#gsvg path{fill:none;stroke:var(--muted);stroke-width:1.3;opacity:.7}
+body.graphing{overflow:hidden}
 .err{border-radius:12px;padding:14px;background:var(--warn-bg);color:var(--warn)}
 .err code{font-family:var(--font-mono);font-size:.8rem;word-break:break-all}
 .skel{height:14px;border-radius:6px;background:var(--line);margin:14px;opacity:.6}
@@ -145,6 +166,14 @@ footer a{color:inherit}
   <div id="view"></div>
   <footer>Uses the FHIR terminology API. <a id="shrimpLink" href="#" target="_blank" rel="noopener">Open this concept in Shrimp</a></footer>
 </div></main>
+<div id="graph" hidden aria-label="Relationship diagram">
+  <div class="gbar">
+    <button class="iconbtn" id="gback" aria-label="Back" disabled><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <span class="gtitle" id="gtitle"></span>
+    <span class="gkey"><span><i style="background:var(--defined);border:2px double var(--defined-line)"></i>Defined</span><span><i style="background:var(--prim);border:1.5px solid var(--prim-line)"></i>Primitive</span></span>
+  </div>
+  <div class="gscroll" id="gscroll"><div class="gcontent" id="gcontent"></div></div>
+</div>
 
 <script>
 (function(){
@@ -282,6 +311,7 @@ function open(code,push){
   try{history.replaceState(null,"","#"+code)}catch(e){}
   $("shrimpLink").href="https://ontoserver.csiro.au/shrimp/?concept="+code+"&valueset="+encodeURIComponent(vs(""))+"&fhir="+encodeURIComponent(cfg.base);
   var seq=++loadSeq;
+  if(graphOn()){$("gtitle").textContent="Loading…"}
   view.innerHTML=sectionHTML("Parents","",'<div class="skel"></div>')+'<div class="focus"><div class="skel" style="width:70%;margin:0 0 10px"></div><div class="skel" style="width:45%;margin:0"></div></div>'+sectionHTML("Children","",'<div class="skel"></div>');
   window.scrollTo(0,0);
 
@@ -293,6 +323,9 @@ function open(code,push){
     var inactive=(d.props.inactive||[])[0]===true||(d.props.inactive||[])[0]==="true";
     var defined=(d.props.sufficientlyDefined||[])[0]===true||(d.props.sufficientlyDefined||[])[0]==="true";
     remember(code,d.display);
+    G.code=code;G.display=d.display;G.parents=null;G.children=null;G.childTotal=0;G.gp={};G.defined={};G.seq=seq;
+    G.defined[code]=defined;
+    loadGraphExtras(seq);
     var ungrouped=d.attrs,groups=d.groups;
     if(!ungrouped.length&&!groups.length&&d.normalFormTerse){var nf=parseNormalForm(d.normalFormTerse);ungrouped=nf.ungrouped;groups=nf.groups}
     var syn=[],byVal={},refsets={};
@@ -329,8 +362,8 @@ function open(code,push){
     $("copyBtn").onclick=function(){copy(code+" |"+d.display+"|",this)};
     labelRefsets(Object.keys(refsets),seq);
     labelAttrs(ungrouped.concat([].concat.apply([],groups)),seq);
-    P.then(function(r){if(seq!==loadSeq)return;fill("parentsSlot","Parents",r,">!",code)},function(e){fillErr("parentsSlot","Parents",e)});
-    C.then(function(r){if(seq!==loadSeq)return;fill("childrenSlot","Children",r,"<!",code)},function(e){fillErr("childrenSlot","Children",e)});
+    P.then(function(r){if(seq!==loadSeq)return;G.parents=r.items;fill("parentsSlot","Parents",r,">!",code);loadGraphExtras(seq);drawGraph()},function(e){fillErr("parentsSlot","Parents",e)});
+    C.then(function(r){if(seq!==loadSeq)return;G.children=r.items;G.childTotal=r.total!=null?r.total:r.items.length;fill("childrenSlot","Children",r,"<!",code);loadGraphExtras(seq);drawGraph()},function(e){fillErr("childrenSlot","Children",e)});
   }).catch(function(e){if(seq===loadSeq)showError(e)});
 }
 function relHTML(r){
@@ -386,7 +419,8 @@ var kidCache={};
 function kidKey(c){return cfg.base+"|"+cfg.edition+"|"+c}
 function showKids(c,n){
   if(!(n>0))return;
-  view.querySelectorAll('.kids[data-kids="'+c+'"]').forEach(function(el){el.textContent=n;el.title=n+(n===1?" child":" children");el.setAttribute("aria-label",el.title);el.hidden=false});
+  document.querySelectorAll('.kids[data-kids="'+c+'"]').forEach(function(el){el.textContent=n;el.title=n+(n===1?" child":" children");el.setAttribute("aria-label",el.title);el.hidden=false});
+  if(graphOn()){clearTimeout(showKids.t);showKids.t=setTimeout(edges,60)}
 }
 function countKids(items,seq){
   var queue=[];
@@ -413,6 +447,89 @@ function copy(text,btn){
   try{navigator.clipboard.writeText(text).then(done,function(){fallback()})}catch(e){fallback()}
   function fallback(){var t=document.createElement("textarea");t.value=text;document.body.appendChild(t);t.select();try{document.execCommand("copy");done()}catch(e){}t.remove()}
 }
+
+/* ---------- landscape graph ---------- */
+var G={code:null,parents:null,children:null,childTotal:0,gp:{},defined:{},seq:0,extras:{}};
+var landscape=window.matchMedia("(orientation: landscape) and (max-height: 520px)");
+function graphOn(){return landscape.matches}
+function loadGraphExtras(seq){
+  if(!graphOn()||seq!==loadSeq||!G.parents||!G.children)return;
+  var key=seq+"";if(G.extras[key])return;G.extras[key]=1;
+  // grandparents: one small query per parent
+  G.parents.forEach(function(p){
+    expand(">!"+p.code,{count:30,active:false}).then(function(r){if(seq!==loadSeq)return;G.gp[p.code]=r.items;drawGraph();typeCodes(r.items.map(function(x){return x.code}),seq)}).catch(function(){});
+  });
+  // defined vs primitive for every node on screen, in one query; skipped quietly if the server lacks ECL filters
+  typeCodes(G.parents.map(function(x){return x.code}).concat(G.children.map(function(x){return x.code})),seq);
+}
+function typeCodes(codes,seq){
+  codes=codes.filter(function(c){return G.defined[c]===undefined});
+  if(!codes.length)return;
+  var ecl="("+codes.join(" OR ")+") {{ C definitionStatusId = 900000000000073002 }}";
+  expand(ecl,{count:codes.length,active:false}).then(function(r){
+    if(seq!==loadSeq)return;
+    codes.forEach(function(c){G.defined[c]=false});
+    r.items.forEach(function(it){G.defined[it.code]=true});
+    drawGraph();
+  }).catch(function(){});
+}
+function nodeHTML(c,extra){
+  var t=G.defined[c.code];var cls=t===true?" d":(t===false?" p":"");
+  var k=kidCache[kidKey(c.code)];
+  return '<button type="button" class="gn'+cls+(extra||"")+'" data-g="'+esc(c.code)+'" title="'+esc(c.code)+'"><span>'+esc(c.display||c.code)+'</span>'+
+    (extra?'':'<span class="kids" data-kids="'+esc(c.code)+'"'+(k>0?'':' hidden')+'>'+(k>0?k:"")+'</span>')+'</button>';
+}
+function drawGraph(){
+  var box=$("graph");
+  if(!graphOn()){if(!box.hidden){box.hidden=true;document.body.classList.remove("graphing")}return}
+  box.hidden=false;document.body.classList.add("graphing");
+  $("gback").disabled=!stack.length;
+  $("gtitle").textContent=G.display||"Loading…";
+  var gc=$("gcontent");
+  if(!G.code){gc.innerHTML='<div class="gcol"><span class="small">Loading…</span></div>';return}
+  var parents=G.parents||[],children=G.children||[];
+  var gps=[],seen={};
+  parents.forEach(function(p){(G.gp[p.code]||[]).forEach(function(g){if(!seen[g.code]){seen[g.code]=1;gps.push(g)}})});
+  var h='';
+  if(gps.length)h+='<div class="gcol" data-col="gp">'+gps.map(function(c){return nodeHTML(c)}).join("")+'</div>';
+  if(parents.length)h+='<div class="gcol" data-col="p">'+parents.map(function(c){return nodeHTML(c)}).join("")+'</div>';
+  else if(G.parents)h+='';
+  h+='<div class="gcol" data-col="f">'+nodeHTML({code:G.code,display:G.display}," focus-n")+'</div>';
+  if(children.length){
+    h+='<div class="gcol" data-col="c">'+children.map(function(c){return nodeHTML(c)}).join("")+
+      (G.childTotal>children.length?'<span class="gn more">+'+(G.childTotal-children.length)+' more in portrait view</span>':'')+'</div>';
+  }else if(G.children)h+='<div class="gcol"><span class="small">No children</span></div>';
+  h+='<svg id="gsvg"></svg>';
+  var sc=$("gscroll"),keepY=G.drawnFor===G.code?sc.scrollTop:null;
+  gc.innerHTML=h;
+  requestAnimationFrame(function(){edges();
+    if(keepY!==null)sc.scrollTop=keepY;
+    else{var f=gc.querySelector(".focus-n");if(f)sc.scrollTop=Math.max(0,f.offsetTop+f.offsetHeight/2-sc.clientHeight/2);sc.scrollLeft=Math.max(0,sc.scrollWidth-sc.clientWidth)}
+    G.drawnFor=G.code;
+  });
+}
+function edges(){
+  var gc=$("gcontent"),svg=$("gsvg");if(!svg)return;
+  var base=gc.getBoundingClientRect();
+  svg.setAttribute("width",gc.scrollWidth);svg.setAttribute("height",gc.scrollHeight);
+  function anchor(el,side){var r=el.getBoundingClientRect();return{x:(side==="r"?r.right:r.left)-base.left,y:r.top+r.height/2-base.top}}
+  function node(col,code){return gc.querySelector('[data-col="'+col+'"] [data-g="'+code+'"]')}
+  var paths=[];
+  function link(a,b){if(!a||!b)return;var p=anchor(a,"r"),q=anchor(b,"l"),dx=(q.x-p.x)/2;
+    paths.push('<path d="M'+p.x+' '+p.y+' C'+(p.x+dx)+' '+p.y+','+(q.x-dx)+' '+q.y+','+q.x+' '+q.y+'"/>')}
+  var f=gc.querySelector(".focus-n");
+  (G.parents||[]).forEach(function(p){
+    link(node("p",p.code),f);
+    (G.gp[p.code]||[]).forEach(function(g){link(node("gp",g.code),node("p",p.code))});
+  });
+  (G.children||[]).forEach(function(c){link(f,node("c",c.code))});
+  svg.innerHTML=paths.join("");
+}
+$("graph").addEventListener("click",function(e){var b=e.target.closest("[data-g]");if(b&&!b.classList.contains("focus-n"))open(b.dataset.g)});
+$("gback").onclick=function(){$("back").click()};
+function onOrient(){drawGraph();if(graphOn())loadGraphExtras(loadSeq)}
+if(landscape.addEventListener)landscape.addEventListener("change",onOrient);else if(landscape.addListener)landscape.addListener(onOrient);
+var rsz;window.addEventListener("resize",function(){clearTimeout(rsz);rsz=setTimeout(function(){if(graphOn())edges()},120)});
 
 function remember(code,display){
   trail=trail.filter(function(t){return t.code!==code});trail.unshift({code:code,display:display});trail=trail.slice(0,12);
