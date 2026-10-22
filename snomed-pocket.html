@@ -54,6 +54,10 @@ header #resInner{display:flex;flex-direction:column;align-items:stretch;gap:0;pa
 .res{display:block;width:100%;text-align:left;border:0;background:none;padding:10px 4px;border-bottom:1px solid var(--line);cursor:pointer}
 .res:last-child{border-bottom:0}
 .res .pt{display:block}
+.res .meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
+.stag{font-size:.7rem;letter-spacing:.03em;border-radius:999px;padding:1px 8px;border:1px solid currentColor;line-height:1.5}
+.stag.g-find{color:var(--warn)} .stag.g-sub{color:var(--attr-line)} .stag.g-med{color:var(--defined-line)}
+.stag.g-proc{color:var(--accent)} .stag.g-struct{color:var(--prim-line)} .stag.g-obs,.stag.g-qual,.stag.g-org,.stag.g-obj,.stag.g-other{color:var(--muted)}
 .code{font-family:var(--font-mono);font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
 .res mark{background:var(--attr);color:inherit;border-radius:2px}
 main .wrap{padding-block:14px 40px;display:flex;flex-direction:column;gap:14px}
@@ -218,9 +222,16 @@ function expand(ecl,opts,signal){
   var p=[["url",vs(ecl)],["count",String(opts.count||100)],["offset",String(opts.offset||0)]];
   if(opts.filter)p.push(["filter",opts.filter]);
   if(opts.active!==false)p.push(["activeOnly","true"]);
+  if(opts.fsn){p.push(["includeDesignations","true"]);p.push(["designation",SCT+"|"+FSN])}
   return fhir("/ValueSet/$expand",p,signal).then(function(j){
     var e=(j&&j.expansion)||{};
-    return{total:e.total,items:(e.contains||[]).map(function(c){return{code:c.code,display:c.display}})};
+    return{total:e.total,items:(e.contains||[]).map(function(c){
+      var it={code:c.code,display:c.display};
+      if(opts.fsn)(c.designation||[]).some(function(d){if(d.use&&d.use.code===FSN){it.fsn=d.value;return true}});
+      return it})};
+  }).catch(function(e){
+    if(opts.fsn&&e.status){var o={};for(var k in opts)if(k!=="fsn")o[k]=opts[k];return expand(ecl,o,signal)}
+    throw e;
   });
 }
 
@@ -541,6 +552,14 @@ function renderTrail(){
 
 /* ---------- search ---------- */
 var sTimer=null,sCtrl=null;
+function semTag(fsn){
+  var m=/\(([^()]+)\)\s*$/.exec(fsn||"");if(!m)return "";
+  var t=m[1],g=TAGGROUP[t]||"other";
+  return '<span class="stag g-'+g+'">'+esc(t)+'</span>';
+}
+var TAGGROUP={"disorder":"find","finding":"find","situation":"find","event":"find","morphologic abnormality":"struct","body structure":"struct","cell structure":"struct","cell":"struct",
+  "substance":"sub","product":"med","medicinal product":"med","medicinal product form":"med","clinical drug":"med","real clinical drug":"med","physical object":"obj",
+  "procedure":"proc","regime/therapy":"proc","observable entity":"obs","qualifier value":"qual","attribute":"qual","organism":"org","specimen":"obj","assessment scale":"obs"};
 function hideResults(){results.hidden=true;resInner.innerHTML=""}
 function hl(text,term){var words=term.toLowerCase().split(/\s+/).filter(Boolean);var out=esc(text);words.forEach(function(w){out=out.replace(new RegExp("("+w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+")","ig"),"<mark>$1</mark>")});return out}
 q.addEventListener("input",function(){
@@ -549,12 +568,12 @@ q.addEventListener("input",function(){
   sTimer=setTimeout(function(){
     if(sCtrl)sCtrl.abort();sCtrl=new AbortController();
     resInner.innerHTML='<div class="empty">Searching…</div>';results.hidden=false;
-    var jobs=[expand("",{filter:term,count:25},sCtrl.signal)];
+    var jobs=[expand("",{filter:term,count:25,fsn:true},sCtrl.signal)];
     Promise.all(jobs).then(function(rs){
       var r=rs[0];
       var hits=r.items;
       var codeHit=/^\d{6,18}$/.test(term)?'<button class="res" data-code="'+term+'"><span class="pt">Open concept '+term+'</span><span class="code">Go to SCTID</span></button>':"";
-      resInner.innerHTML=codeHit+(hits.length?hits.map(function(c){return '<button class="res" data-code="'+esc(c.code)+'"><span class="pt">'+hl(c.display,term)+'</span><span class="code">'+esc(c.code)+'</span></button>'}).join(""):(codeHit?"":'<div class="empty">No active concepts match “'+esc(term)+'”.</div>'))+
+      resInner.innerHTML=codeHit+(hits.length?hits.map(function(c){return '<button class="res" data-code="'+esc(c.code)+'"><span class="pt">'+hl(c.display,term)+'</span><span class="meta"><span class="code">'+esc(c.code)+'</span>'+semTag(c.fsn)+'</span></button>'}).join(""):(codeHit?"":'<div class="empty">No active concepts match “'+esc(term)+'”.</div>'))+
         (r.total>hits.length?'<div class="empty small">Showing '+hits.length+' of '+r.total+'. Add words to narrow it.</div>':"");
     }).catch(function(e){if(e.name==="AbortError")return;
       if(/^\d{6,18}$/.test(term))resInner.innerHTML='<button class="res" data-code="'+term+'"><span class="pt">Open concept '+term+'</span></button>';
