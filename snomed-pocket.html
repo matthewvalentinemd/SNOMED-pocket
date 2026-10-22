@@ -76,6 +76,7 @@ section>h2{margin:0;padding:12px 14px;font-size:.78rem;letter-spacing:.08em;text
 .cl:last-child{border-bottom:0}
 .cl .t{flex:1;min-width:0}
 .cl .t span{display:block}
+.kids{flex:none;font-family:var(--font-mono);font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px;font-variant-numeric:tabular-nums}
 .cl svg{flex:none;width:16px;height:16px;stroke:var(--muted);fill:none;stroke-width:2}
 .box{flex:none;width:10px;height:10px;border-radius:2px;border:1.5px solid var(--prim-line);background:var(--prim)}
 .groups{border-top:1px solid var(--line);display:flex;flex-direction:column;gap:10px;padding:12px}
@@ -260,7 +261,7 @@ function lookup(code){
 
 /* ---------- rendering ---------- */
 var chev='<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
-function conceptRow(c){return '<button class="cl" data-code="'+esc(c.code)+'"><span class="box"></span><span class="t"><span>'+esc(c.display||c.code)+'</span><span class="code">'+esc(c.code)+'</span></span>'+chev+'</button>'}
+function conceptRow(c){return '<button class="cl" data-code="'+esc(c.code)+'"><span class="box"></span><span class="t"><span>'+esc(c.display||c.code)+'</span><span class="code">'+esc(c.code)+'</span></span><span class="kids" data-kids="'+esc(c.code)+'" hidden></span>'+chev+'</button>'}
 function sectionHTML(title,count,body,id){return '<section'+(id?' id="'+id+'"':'')+'><h2><span>'+title+'</span><span class="code">'+(count==null?"":count)+'</span></h2>'+body+'</section>'}
 
 function showError(e){
@@ -374,10 +375,36 @@ function fill(slot,title,r,op,code){
   var body='<div class="list" id="'+slot+'List">'+r.items.map(conceptRow).join("")+'</div>';
   if(total>r.items.length)body+='<button class="more" type="button" id="'+slot+'More">Show more ('+(total-r.items.length)+' left)</button>';
   el.innerHTML=sectionHTML(title,total,body);
+  if(slot==="childrenSlot")countKids(r.items,loadSeq);
   var more=$(slot+"More");
   if(more){var offset=r.items.length;more.onclick=function(){more.disabled=true;more.textContent="Loading…";
-    expand(op+code,{count:100,offset:offset}).then(function(n){offset+=n.items.length;$(slot+"List").insertAdjacentHTML("beforeend",n.items.map(conceptRow).join(""));
+    expand(op+code,{count:100,offset:offset}).then(function(n){offset+=n.items.length;$(slot+"List").insertAdjacentHTML("beforeend",n.items.map(conceptRow).join(""));if(slot==="childrenSlot")countKids(n.items,loadSeq);
       if(offset<total){more.disabled=false;more.textContent="Show more ("+(total-offset)+" left)"}else more.remove()},function(){more.disabled=false;more.textContent="Couldn't load. Tap to retry"})}}
+}
+/* Grandchild counts: one count-only query per child row, six at a time, cached for the session */
+var kidCache={};
+function kidKey(c){return cfg.base+"|"+cfg.edition+"|"+c}
+function showKids(c,n){
+  if(!(n>0))return;
+  view.querySelectorAll('.kids[data-kids="'+c+'"]').forEach(function(el){el.textContent=n;el.title=n+(n===1?" child":" children");el.setAttribute("aria-label",el.title);el.hidden=false});
+}
+function countKids(items,seq){
+  var queue=[];
+  items.forEach(function(it){var k=kidCache[kidKey(it.code)];if(k===undefined)queue.push(it.code);else showKids(it.code,k)});
+  var active=0;
+  function next(){
+    while(seq===loadSeq&&active<6&&queue.length){
+      var c=queue.shift();active++;
+      (function(c){
+        expand("<!"+c,{count:1}).then(function(r){
+          var n=r.total!=null?r.total:(r.items.length?null:0);
+          if(n!==null)kidCache[kidKey(c)]=n;
+          if(seq===loadSeq)showKids(c,n);
+        }).catch(function(){}).then(function(){active--;next()});
+      })(c);
+    }
+  }
+  next();
 }
 function fillErr(slot,title,e){var el=$(slot);if(el)el.innerHTML=sectionHTML(title,"",'<div class="empty">Couldn\'t load: '+esc(e.message)+'</div>')}
 
