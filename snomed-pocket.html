@@ -54,6 +54,7 @@ header #resInner{display:flex;flex-direction:column;align-items:stretch;gap:0;pa
 .res{display:block;width:100%;text-align:left;border:0;background:none;padding:10px 4px;border-bottom:1px solid var(--line);cursor:pointer}
 .res:last-child{border-bottom:0}
 .res .pt{display:block}
+.rhead{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:12px 4px 4px;border-bottom:1px solid var(--line)}
 .res .meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
 .stag{font-size:.7rem;letter-spacing:.03em;border-radius:999px;padding:1px 8px;border:1px solid currentColor;line-height:1.5}
 .stag.g-find{color:var(--warn)} .stag.g-sub{color:var(--attr-line)} .stag.g-med{color:var(--defined-line)}
@@ -566,17 +567,43 @@ q.addEventListener("input",function(){
   clearTimeout(sTimer);var term=q.value.trim();
   if(term.length<2){hideResults();return}
   sTimer=setTimeout(function(){
-    if(sCtrl)sCtrl.abort();sCtrl=new AbortController();
+    if(sCtrl)sCtrl.abort();sCtrl=new AbortController();var sig=sCtrl.signal;
     resInner.innerHTML='<div class="empty">Searching…</div>';results.hidden=false;
-    var jobs=[expand("",{filter:term,count:25,fsn:true},sCtrl.signal)];
-    Promise.all(jobs).then(function(rs){
-      var r=rs[0];
-      var hits=r.items;
-      var codeHit=/^\d{6,18}$/.test(term)?'<button class="res" data-code="'+term+'"><span class="pt">Open concept '+term+'</span><span class="code">Go to SCTID</span></button>':"";
-      resInner.innerHTML=codeHit+(hits.length?hits.map(function(c){return '<button class="res" data-code="'+esc(c.code)+'"><span class="pt">'+hl(c.display,term)+'</span><span class="meta"><span class="code">'+esc(c.code)+'</span>'+semTag(c.fsn)+'</span></button>'}).join(""):(codeHit?"":'<div class="empty">No active concepts match “'+esc(term)+'”.</div>'))+
-        (r.total>hits.length?'<div class="empty small">Showing '+hits.length+' of '+r.total+'. Add words to narrow it.</div>':"");
+    var codeHit=/^\d{6,18}$/.test(term)?'<button class="res" data-code="'+term+'"><span class="pt">Open concept '+term+'</span><span class="code">Go to SCTID</span></button>':"";
+    expand("",{filter:term,count:100,fsn:true},sig).then(function(r){
+      // Broader concepts: matches that have other matches beneath them in the hierarchy. One extra query, 1.5 s cap.
+      var cands=r.items.slice(0,80).map(function(c){return c.code});
+      var hubQ=cands.length>1?Promise.race([
+        expand("("+cands.join(" OR ")+") AND >("+cands.join(" OR ")+")",{count:80},sig).then(function(h){
+          var hc=h.items.map(function(x){return x.code});
+          if(hc.length<2)return hc.map(function(c){return{code:c,tier:2}});
+          // second pass: broader concepts that sit above other broader concepts go first (e.g. Diabetes mellitus above Type 1)
+          return expand("("+hc.join(" OR ")+") AND >("+hc.join(" OR ")+")",{count:80},sig).then(function(t){
+            var top={};t.items.forEach(function(x){top[x.code]=1});
+            return hc.map(function(c){return{code:c,tier:top[c]?1:2}});
+          }).catch(function(e){if(e.name==="AbortError")throw e;return hc.map(function(c){return{code:c,tier:2}})});
+        }),
+        new Promise(function(res){setTimeout(function(){res([])},1500)})
+      ]).catch(function(e){if(e.name==="AbortError")throw e;return []}):Promise.resolve([]);
+      return hubQ.then(function(hubCodes){return{r:r,hubs:hubCodes}});
+    }).then(function(x){
+      var r=x.r,isHub={};x.hubs.forEach(function(h){isHub[h.code]=h.tier});
+      var hubs=r.items.filter(function(c){return isHub[c.code]});
+      hubs=hubs.filter(function(c){return isHub[c.code]===1}).concat(hubs.filter(function(c){return isHub[c.code]===2}));
+      var rest=r.items.filter(function(c){return !isHub[c.code]}).slice(0,Math.max(10,30-hubs.length));
+      var row=function(c){return '<button class="res" data-code="'+esc(c.code)+'"><span class="pt">'+hl(c.display,term)+'</span><span class="meta"><span class="code">'+esc(c.code)+'</span>'+semTag(c.fsn)+'</span></button>'};
+      var html=codeHit;
+      if(!r.items.length&&!codeHit)html='<div class="empty">No active concepts match “'+esc(term)+'”.</div>';
+      if(hubs.length){
+        html+='<div class="rhead">Broader concepts</div>'+hubs.map(row).join("");
+        if(rest.length)html+='<div class="rhead">Other matches</div>';
+      }
+      html+=rest.map(row).join("");
+      var shown=hubs.length+rest.length;
+      if(r.total>shown)html+='<div class="empty small">Showing '+shown+' of '+r.total+'. Add words to narrow it.</div>';
+      resInner.innerHTML=html;
     }).catch(function(e){if(e.name==="AbortError")return;
-      if(/^\d{6,18}$/.test(term))resInner.innerHTML='<button class="res" data-code="'+term+'"><span class="pt">Open concept '+term+'</span></button>';
+      if(codeHit)resInner.innerHTML='<button class="res" data-code="'+term+'"><span class="pt">Open concept '+term+'</span></button>';
       else resInner.innerHTML='<div class="empty">Search failed: '+esc(e.message)+'</div>'});
   },280);
 });
