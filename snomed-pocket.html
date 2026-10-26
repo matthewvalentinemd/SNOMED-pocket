@@ -108,11 +108,13 @@ details summary{cursor:pointer;padding:12px 14px;font-size:.78rem;letter-spacing
   padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
 .gbar{flex:none;display:flex;align-items:center;gap:10px;padding:6px max(12px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line);background:var(--surface)}
 .gbar .iconbtn{width:34px;height:34px}
+.gclose{flex:none;border:1px solid var(--accent);background:var(--accent);color:var(--surface);border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer}
+@media (pointer:coarse){#diag{display:none}}
 .gbar .gtitle{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
 .gkey{display:flex;gap:10px;align-items:center;font-size:.72rem;color:var(--muted);flex:none}
 .gkey i{display:inline-block;width:12px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
 .gscroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch}
-.gcontent{position:relative;display:flex;align-items:stretch;gap:34px;padding:14px 16px;min-height:100%;width:max-content;min-width:100%}
+.gcontent{position:relative;display:flex;justify-content:center;align-items:stretch;gap:34px;padding:14px 16px;min-height:100%;width:max-content;min-width:100%}
 .gcol{position:relative;z-index:1;display:flex;flex-direction:column;justify-content:center;gap:8px}
 .gn{display:flex;align-items:center;gap:6px;max-width:12.5rem;text-align:left;font-size:.78rem;line-height:1.2;padding:6px 10px;border-radius:9px;
   background:var(--surface);border:1.5px solid var(--line);cursor:pointer}
@@ -144,6 +146,7 @@ footer a{color:inherit}
   <div class="wrap" style="position:relative">
     <button class="iconbtn" id="back" aria-label="Back" disabled><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
     <input id="q" type="search" placeholder="Search term or SCTID" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Search SNOMED CT">
+    <button class="iconbtn" id="diag" aria-label="Show relationship diagram" title="Diagram view"><svg viewBox="0 0 24 24"><rect x="2" y="9" width="6" height="6" rx="1.5"/><rect x="16" y="3" width="6" height="5" rx="1.5"/><rect x="16" y="16" width="6" height="5" rx="1.5"/><path d="M8 12c4 0 4-6.5 8-6.5M8 12c4 0 4 6.5 8 6.5"/></svg></button>
     <button class="iconbtn" id="cog" aria-label="Server settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
     <div id="results" hidden><div class="wrap" id="resInner"></div></div>
   </div>
@@ -175,6 +178,7 @@ footer a{color:inherit}
   <div class="gbar">
     <button class="iconbtn" id="gback" aria-label="Back" disabled><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
     <span class="gtitle" id="gtitle"></span>
+    <button class="gclose" id="gclose" type="button" hidden>List view</button>
     <span class="gkey"><span><i style="background:var(--defined);border:2px double var(--defined-line)"></i>Defined</span><span><i style="background:var(--prim);border:1.5px solid var(--prim-line)"></i>Primitive</span></span>
   </div>
   <div class="gscroll" id="gscroll"><div class="gcontent" id="gcontent"></div></div>
@@ -463,7 +467,15 @@ function copy(text,btn){
 /* ---------- landscape graph ---------- */
 var G={code:null,parents:null,children:null,childTotal:0,gp:{},defined:{},seq:0,extras:{}};
 var landscape=window.matchMedia("(orientation: landscape) and (max-height: 520px)");
-function graphOn(){return landscape.matches}
+var manualGraph=false;
+function graphOn(){return landscape.matches||manualGraph}
+function setManualGraph(on){
+  manualGraph=on;$("gclose").hidden=!on;
+  drawGraph();if(on)loadGraphExtras(loadSeq);
+}
+$("diag").onclick=function(){hideResults();setManualGraph(true)};
+$("gclose").onclick=function(){setManualGraph(false)};
+document.addEventListener("keydown",function(e){if(e.key==="Escape"&&manualGraph)setManualGraph(false)});
 function loadGraphExtras(seq){
   if(!graphOn()||seq!==loadSeq||!G.parents||!G.children)return;
   var key=seq+"";if(G.extras[key])return;G.extras[key]=1;
